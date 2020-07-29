@@ -5,12 +5,12 @@
 // (See accompanying file LICENSE_1_0.txt or copy at
 // http://www.boost.org/LICENSE_1_0.txt)
 //
-#include <boost/sml.hpp>
 #include <iostream>
 #include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
+#include <boost/sml.hpp>
 
 namespace sml = boost::sml;
 
@@ -543,6 +543,8 @@ test initial_entry = [] {
   const c& c_ = sm;
   expect(1 == c_.entry_calls);
 };
+template <typename T>
+struct DBG;
 
 test initial_nontrivial_entry = [] {
   struct c {
@@ -550,9 +552,19 @@ test initial_nontrivial_entry = [] {
       using namespace sml;
       // clang-format off
       return make_transition_table(
-         *idle + sml::on_entry<e2> / [] {}
+         *idle + sml::on_entry<e2> / [this] { entry_calls+=2; }
+         ,idle + sml::on_entry<_> / [this] { entry_calls-=1; }
          ,idle + event<e2> = s1
-         ,s1 + on_entry<_> / [this] { ++entry_calls; }
+         ,s1 + on_entry<_> / [this] { entry_calls-=1; }
+         ,s1 + event<e3> = s2
+         ,s2 + on_entry<e3> / [this] { entry_calls+=3; }
+         ,s2 + on_entry<e2> / [this] { entry_calls+=2; }
+         ,s2 + on_entry<e1> / [this] { entry_calls+=1; }
+         ,s2 + on_entry<_>  / [this] { --entry_calls; }
+         ,s2 + event<e3> = s3
+         ,s3 + on_entry<e2> / [this] { entry_calls+=2; }
+         ,s3 + on_entry<e1> / [this] { entry_calls+=1; }
+         ,s3 + on_entry<_> / [this] { --entry_calls; }
       );
       // clang-format on
     }
@@ -560,10 +572,71 @@ test initial_nontrivial_entry = [] {
     int entry_calls = 0;
   };
 
-  sml::sm<c> sm{};
-  const c& c_ = sm;
-  sm.process_event(e2{});
-  expect(1 == c_.entry_calls);
+  struct d {
+    auto operator()() noexcept {
+      using namespace sml;
+      // clang-format off
+      return make_transition_table(
+        *idle + event<e2> = state<c>
+      );
+      // clang-format on
+    }
+  };
+  {
+    using namespace sml;
+    using _ = back::_;
+    // using c_sm_impl_t = back::sm_impl<back::sm_policy<c>>;
+    // using d_sm_impl_t = back::sm_impl<back::sm_policy<c>>;
+    // DBG<back::mappings_t<c_sm_impl_t::transitions_t>>{};
+    // DBG<back::get_event_mapping_t<back::get_mapped_t<back::on_entry<_, e2>>, c_sm_impl_t::mappings>>{};
+    // DBG<c_sm_impl_t::transitions_t>{};
+    // using transitions_t = sm_impl_t::transitions_t;
+
+    // DBG<back::on_entry<_, e1>>{};
+    // DBG<back::get_mapped_t<back::on_entry<_, _>>>{};
+    // DBG<back::get_generic_t<back::on_entry<_, _>>>{};
+    // DBG<aux::is_base_of<back::get_mapped_t<back::on_entry<_, _>>, events_ids_t>>{};
+    // DBG<aux::is_base_of<back::get_generic_t<back::on_entry<_, _>>, events_ids_t>>{};
+
+    // DBG<decltype(on_entry<e1>)>{};
+    // DBG<back::get_mapped_t<decltype(on_entry<e1>)>>{};
+    // DBG<back::get_generic_t<decltype(on_entry<e1>)>>{};
+
+    // DBG<decltype(on_entry<_>)>{};
+    // DBG<back::get_mapped_t<decltype(on_entry<_>)>>{};
+    // DBG<back::get_generic_t<decltype(on_entry<_>)>>{};
+
+    std::cout << "\n\n\n\n\n\nMy test ont_entry\n";
+
+    sml::sm<c> sm{};
+    const c& c_ = sm;
+    std::cout << c_.entry_calls << "\n";
+    expect(-1 == c_.entry_calls);
+    sm.process_event(e2{});
+    std::cout << c_.entry_calls << "\n";
+    expect(sm.is(s1));
+    expect(-2 == c_.entry_calls);
+    sm.process_event(e3{});
+    std::cout << c_.entry_calls << "\n";
+    expect(1 == c_.entry_calls);
+    sm.process_event(e3{});
+    std::cout << c_.entry_calls << "\n";
+    expect(0 == c_.entry_calls);
+  }
+  {
+    sml::sm<d> sm{};
+    const c& c_ = sm;
+    sm.process_event(e2{});
+    std::cout << c_.entry_calls << "\n";
+    expect(2 == c_.entry_calls);
+    sm.process_event(e2{});
+    std::cout << c_.entry_calls << "\n";
+    expect(1 == c_.entry_calls);
+    sm.process_event(e3{});
+    expect(4 == c_.entry_calls);
+    sm.process_event(e3{});
+    expect(3 == c_.entry_calls);
+  }
 };
 
 test initial_nontrivial_exit = [] {
@@ -572,20 +645,72 @@ test initial_nontrivial_exit = [] {
       using namespace sml;
       // clang-format off
       return make_transition_table(
-         *idle + sml::on_exit<_> / [this] { ++entry_calls; }
+         *idle + sml::on_exit<_> / [this] { calls+="_|"; }
+         ,idle + sml::on_exit<e2> / [this] { calls+="e2|"; }
          ,idle + event<e1> = s1
-         ,s1 + sml::on_exit<e1> / [] {}
+         ,idle + event<e2> = s1
+         ,s1 + sml::on_exit<e2> / [this] { calls+="e2|"; }
+         ,s1 + sml::on_exit<e1> / [this] { calls+="e1|"; }
+         ,s1 + sml::on_exit<_> / [this] { calls+="_|"; }
+         ,s1 + event<e3> = s2
+         ,s1 + event<e1> = s2
+         ,s2 + sml::on_exit<e3>  / [this] { calls+="e3|"; }
+         ,s2 + sml::on_exit<e2> / [this] { calls+="e2|"; }
+         ,s2 + sml::on_exit<e1> / [this] { calls+="e1|"; }
+         ,s2 + sml::on_exit<_> / [this] { calls+="_|"; }
+         ,s2 + event<e3> = s3
       );
       // clang-format on
     }
 
-    int entry_calls = 0;
+    std::string calls;
   };
 
-  sml::sm<c> sm{};
-  const c& c_ = sm;
-  sm.process_event(e1{});
-  expect(1 == c_.entry_calls);
+  struct d {
+    auto operator()() noexcept {
+      using namespace sml;
+      // clang-format off
+      return make_transition_table(
+        *state<c> + event<e2> = idle
+        , idle + on_entry<_> / []{std::cout << "idle\n";}
+      );
+      // clang-format on
+    }
+  };
+  std::cout << "\n\n\n\n\n\nMy test on_exit\n";
+  {
+    sml::sm<c> sm{};
+    const c& c_ = sm;
+    sm.process_event(e1{});
+    expect(sm.is(s1));
+    std::cout << c_.calls << "\n";
+    expect("_|" == c_.calls);
+    sm.process_event(e3{});
+    expect(sm.is(s2));
+    std::cout << c_.calls << "\n";
+    expect("_|_|" == c_.calls);
+
+    sm.process_event(e3{});
+    std::cout << c_.calls << "\n";
+    expect("_|_|e3|" == c_.calls);
+    expect(sm.is(s3));
+  }
+  {
+    sml::sm<d> sm{};
+    const c& c_ = sm;
+
+    sm.process_event(e1{});
+    std::cout << c_.calls << "\n";
+    expect("_|" == c_.calls);
+
+    sm.process_event(e1{});
+    std::cout << c_.calls << "\n";
+    expect("_|e1|" == c_.calls);
+
+    sm.process_event(e2{});
+    std::cout << c_.calls << "\n";
+    expect("_|e1|e2|" == c_.calls);
+  }
 };
 
 #if !defined(_MSC_VER)
